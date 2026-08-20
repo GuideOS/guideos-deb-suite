@@ -1,0 +1,12 @@
+Source: guideos-deb-suite
+Section: utils
+Priority: optional
+Maintainer: Max Mustermann <mustermann@guideos.de>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.7.0
+
+Package: guideos-deb-suite
+Architecture: all
+Depends: python3, python3-gi, inkscape, ${misc:Depends}
+Description: Grafischer DEB Builder
+ Paket wurde automatisch mit der GuideOS DEB Suite erstellt.

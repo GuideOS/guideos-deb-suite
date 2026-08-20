@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=guideos-deb-suite
+Name[de]=GuideOS DEB Suite
+Comment=Grafischer DEB Builder
+Exec=guideos-deb-suite
+Icon=guideos-deb-suite
+Terminal=false
+StartupNotify=true
+Categories=Utility;GuideOS
+StartupWMClass=guideos-deb-suite
