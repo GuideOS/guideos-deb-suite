@@ -49,8 +49,8 @@ dem SystemHauptskript/usr/bin/<paketname>Starter-Datei/usr/share/applications/<p
 ## 📂 Struktur der erzeugten Pakete
 Das Tool installiert dein Projekt standardmäßig nach folgenden Linux-Standardpfaden:
 
-Quell-DateiZiel _______ Pfad auf dem System    
-Hauptskript ___________ /usr/bin/<paketname>    
-Starter-Datei _________ /usr/share/applications/<paketname>.desktop    
-Icons (SVG) ___________ /usr/share/icons/hicolor/scalable/apps/   
-Weitere Python-Module	/usr/lib/<paketname>/
+`Quell-DateiZiel           Pfad auf dem System`    
+`Hauptskript              /usr/bin/<paketname>`    
+`Starter-Datei            /usr/share/applications/<paketname>.desktop`    
+`Icons (SVG)              /usr/share/icons/hicolor/scalable/apps/`   
+`Weitere Python-Module    /usr/lib/<paketname>/`
