@@ -12,17 +12,18 @@ gi.require_version('Gtk', '4.0')
 gi.require_version('Adw', '1')
 from gi.repository import Adw, Gio, GLib, Gtk
 
-# Vtracer Check
-try:
-    import vtracer
-    HAS_VTRACER = True
-except ImportError:
-    HAS_VTRACER = False
-
 
 def check_and_install_build_tools() -> tuple[bool, str]:
     """Prüft, ob die notwendigen Build-Werkzeuge installiert sind."""
-    required_packages = ["dpkg-dev", "debhelper", "build-essential", "dh-python", "desktop-file-utils"]
+    required_packages = [
+        "dpkg-dev",
+        "debhelper",
+        "build-essential",
+        "dh-python",
+        "desktop-file-utils",
+        "appstream",
+        "inkscape"
+    ]
     missing_packages = []
 
     for pkg in required_packages:
@@ -75,7 +76,6 @@ def detect_python_dependencies(project_dir: Path) -> list[str]:
         'numpy': 'python3-numpy',
         'pandas': 'python3-pandas',
         'cv2': 'python3-opencv',
-        'vtracer': 'python3-vtracer',
     }
 
     deps = ['python3']
@@ -87,39 +87,28 @@ def detect_python_dependencies(project_dir: Path) -> list[str]:
     return deps
 
 
-def vectorize_image(input_path: Path, output_path: Path):
-    """Vektorisiert ein PNG zu SVG via vtracer oder Inkscape CLI."""
-    if HAS_VTRACER:
-        vtracer.convert_image_to_svg_py(
+def vectorize_image_inkscape(input_path: Path, output_path: Path):
+    """Vektorisiert ein PNG zu SVG via Inkscape CLI."""
+    inkscape_bin = '/usr/bin/inkscape'
+    if not os.path.exists(inkscape_bin):
+        raise RuntimeError(
+            "Das Paket 'inkscape' wurde nicht gefunden.\n"
+            "Bitte 'sudo apt install inkscape' ausführen."
+        )
+
+    res = subprocess.run(
+        [
+            inkscape_bin,
             str(input_path),
-            str(output_path),
-            colormode='color',
-            hierarchical='stacked',
-            mode='spline',
-            filter_speckle=4,
-            color_precision=6,
-        )
-    else:
-        inkscape_bin = '/usr/bin/inkscape'
-        if not os.path.exists(inkscape_bin):
-            raise RuntimeError(
-                "Weder 'python3-vtracer' noch 'inkscape' wurden gefunden.\n"
-                "Bitte 'sudo apt install inkscape' ausführen."
-            )
+            '--export-type=svg',
+            f'--export-filename={output_path}',
+        ],
+        capture_output=True,
+        text=True,
+    )
 
-        res = subprocess.run(
-            [
-                inkscape_bin,
-                str(input_path),
-                '--export-type=svg',
-                f'--export-filename={output_path}',
-            ],
-            capture_output=True,
-            text=True,
-        )
-
-        if res.returncode != 0:
-            raise RuntimeError(f'Inkscape Fehler:\n{res.stderr}')
+    if res.returncode != 0:
+        raise RuntimeError(f'Inkscape Fehler:\n{res.stderr}')
 
 
 class GuideosDebBuilderWindow(Adw.ApplicationWindow):
@@ -128,7 +117,7 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
         super().__init__(**kwargs)
 
         self.set_title('GuideOS DEB Suite')
-        self.set_default_size(720, 850)
+        self.set_default_size(750, 920)
 
         main_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_content(main_box)
@@ -156,8 +145,8 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
 
         # --- 2. Icon Vektorierung ---
         group_icon = Adw.PreferencesGroup(
-            title='2. Icon-Vektorierung',
-            description='PNG-Dateien auswählen und automatisch in SVGs umwandeln.',
+            title='2. Icon-Vektorierung (Inkscape)',
+            description='PNG-Dateien auswählen und automatisch via Inkscape in SVGs umwandeln.',
         )
         page.add(group_icon)
 
@@ -220,7 +209,6 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
         self.switch_desktop.set_active(True)
         group_desktop.add(self.switch_desktop)
 
-        # Skript-Wahl
         self.row_desktop_script = Adw.ActionRow(
             title='Haupt-Skript (Exec)',
             subtitle='Kein Skript gewählt'
@@ -230,13 +218,11 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
         self.row_desktop_script.add_suffix(btn_select_script)
         group_desktop.add(self.row_desktop_script)
 
-        # Icon Name für Desktop Entry
         self.entry_desktop_icon = Adw.EntryRow(
             title='Icon-Name (ohne Endung)',
         )
         group_desktop.add(self.entry_desktop_icon)
 
-        # Weitere Desktop-Felder
         self.entry_desktop_name_de = Adw.EntryRow(title='Name [de]')
         self.entry_desktop_type = Adw.EntryRow(title='Type')
         self.entry_desktop_categories = Adw.EntryRow(title='Categories')
@@ -250,15 +236,36 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
         group_desktop.add(self.entry_desktop_categories)
         group_desktop.add(self.switch_desktop_terminal)
 
-        # Standards für Desktop Entry
         self.entry_desktop_type.set_text('Application')
-        self.entry_desktop_categories.set_text('GuideOS;')
+        self.entry_desktop_categories.set_text('Utility;')
         self.switch_desktop_terminal.set_active(False)
 
         self.selected_script_path = None
 
-        # --- 5. Ausführung & Abschluss ---
-        group_build = Adw.PreferencesGroup(title='5. Verarbeitung & Paketbau')
+        # --- 5. AppStream Metainfo Erstellung ---
+        group_appstream = Adw.PreferencesGroup(
+            title='5. AppStream-Metainfo (App-Store Metadata)',
+            description='Generiert .metainfo.xml für GNOME Software / KDE Discover.'
+        )
+        page.add(group_appstream)
+
+        self.switch_appstream = Adw.SwitchRow(
+            title='AppStream-Metainfo generieren',
+            subtitle='Wird nach /usr/share/metainfo/ installiert.',
+        )
+        self.switch_appstream.set_active(True)
+        group_appstream.add(self.switch_appstream)
+
+        self.entry_app_id = Adw.EntryRow(title='App-ID (Reverse-DNS-Format)')
+        self.entry_app_license = Adw.EntryRow(title='Projekt-Lizenz (SPDX-ID)')
+
+        group_appstream.add(self.entry_app_id)
+        group_appstream.add(self.entry_app_license)
+
+        self.entry_app_license.set_text('MIT')
+
+        # --- 6. Ausführung & Abschluss ---
+        group_build = Adw.PreferencesGroup(title='6. Verarbeitung & Paketbau')
         page.add(group_build)
 
         self.build_btn = Gtk.Button(label='Icons Konvertieren & DEB Paket Bauen')
@@ -270,9 +277,17 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
         self.status_row = Adw.ActionRow(
             title='Status', subtitle='Bereit für Projektwahl'
         )
+
+        # SHA-256 Zeile mit Kopier-Button
         self.sha_row = Adw.ActionRow(
             title='SHA-256 Checksumme', subtitle='Noch nicht erzeugt'
         )
+        self.btn_copy_sha = Gtk.Button(icon_name='edit-copy-symbolic')
+        self.btn_copy_sha.set_tooltip_text('Checksumme in Zwischenablage kopieren')
+        self.btn_copy_sha.set_sensitive(False)
+        self.btn_copy_sha.connect('clicked', self.on_copy_sha)
+        self.sha_row.add_suffix(self.btn_copy_sha)
+
         group_build.add(self.status_row)
         group_build.add(self.sha_row)
 
@@ -328,6 +343,14 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
             folder_uri = self.created_deb_path.parent.as_uri()
             Gio.AppInfo.launch_default_for_uri(folder_uri, None)
 
+    def on_copy_sha(self, button):
+        """Kopiert den SHA-256-Wert in die System-Zwischenablage."""
+        sha_text = self.sha_row.get_subtitle()
+        if sha_text and sha_text != 'Noch nicht erzeugt':
+            clipboard = self.get_display().get_clipboard()
+            clipboard.set(sha_text)
+            self.status_row.set_subtitle('📋 Checksumme in Zwischenablage kopiert!')
+
     def on_select_folder(self, button):
         dialog = Gtk.FileDialog(title='Projektordner auswählen')
         dialog.select_folder(self, None, self._on_folder_selected)
@@ -341,6 +364,7 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
 
                 base_name = self.project_dir.name.lower().replace('_', '-')
                 self.entry_pkg.set_text(base_name)
+                self.entry_app_id.set_text(f"org.guideos.{base_name.replace('-', '')}")
 
                 py_files = list(self.project_dir.glob('*.py'))
                 if py_files:
@@ -451,6 +475,32 @@ StartupWMClass={exec_name}
         desktop_file_path.write_text(content, encoding='utf-8')
         return desktop_file_path
 
+    def generate_appstream_file(self, pkg_name: str, desc: str) -> Path:
+        """Erstellt eine AppStream Metainfo XML-Datei im Projektverzeichnis."""
+        app_id = self.entry_app_id.get_text().strip() or f"org.guideos.{pkg_name}"
+        license_type = self.entry_app_license.get_text().strip() or "MIT"
+        icon_name = self.entry_desktop_icon.get_text().strip() or pkg_name
+
+        content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>{app_id}</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>{license_type}</project_license>
+  <name>{pkg_name}</name>
+  <summary>{desc}</summary>
+  <description>
+    <p>
+      {desc}
+    </p>
+  </description>
+  <launchable type="desktop-id">{pkg_name}.desktop</launchable>
+  <icon type="stock">{icon_name}</icon>
+</component>
+"""
+        appstream_path = self.project_dir / f'{app_id}.metainfo.xml'
+        appstream_path.write_text(content, encoding='utf-8')
+        return appstream_path
+
     def convert_icons_and_update_install(
         self, install_lines: list
     ) -> set:
@@ -471,7 +521,7 @@ StartupWMClass={exec_name}
             svg_name = f'{png_file.stem}.svg'
             svg_path = icons_dir / svg_name
 
-            vectorize_image(png_file, svg_path)
+            vectorize_image_inkscape(png_file, svg_path)
 
             rel_svg = svg_path.relative_to(self.project_dir)
             install_lines.append(f'{rel_svg}\tusr/share/icons/hicolor/scalable/apps')
@@ -491,6 +541,10 @@ fi
 
 if [ -x /usr/bin/update-desktop-database ]; then
     update-desktop-database -q /usr/share/applications || true
+fi
+
+if [ -x /usr/bin/appstreamcli ]; then
+    appstreamcli refresh-cache --force || true
 fi
 
 #DEBHELPER#
@@ -522,7 +576,7 @@ Description: {desc}
 """
         (deb_dir / 'control').write_text(control_content, encoding='utf-8')
 
-        # 2. Genau deine simple debian/rules!
+        # 2. Simple debian/rules
         rules_content = "#!/usr/bin/make -f\n%:\n\tdh $@\n"
         rules_file = deb_dir / 'rules'
         rules_file.write_text(rules_content, encoding='utf-8')
@@ -541,12 +595,9 @@ Description: {desc}
                 else self.selected_script_path.name
             )
 
-            # Damit dh_install die Datei ohne .py Erweiterung nach /usr/bin/ kopieren kann,
-            # erstellen wir eine exakte Kopie/Verknüpfung im Projektordner ohne .py
             bin_target_file = self.project_dir / exec_name
             if self.selected_script_path != bin_target_file:
                 shutil.copy2(self.selected_script_path, bin_target_file)
-                # Ausführbar machen (+x)
                 bin_target_file.chmod(bin_target_file.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
         install_lines = []
@@ -563,6 +614,11 @@ Description: {desc}
         if self.switch_desktop.get_active():
             self.generate_desktop_file(pkg, exec_name, desc)
             install_lines.append(f'{pkg}.desktop\tusr/share/applications/')
+
+        # AppStream-Metainfo erzeugen
+        if self.switch_appstream.get_active():
+            appstream_file = self.generate_appstream_file(pkg, desc)
+            install_lines.append(f'{appstream_file.name}\tusr/share/metainfo/')
 
         # Postinst/Postrm erstellen
         self.create_maintainer_scripts(deb_dir)
@@ -581,7 +637,9 @@ Description: {desc}
                     or name in ignored_files
                     or name.startswith('.')
                     or name.endswith('.deb')
+                    or name.endswith('.sha256')
                     or name.endswith('.desktop')
+                    or name.endswith('.metainfo.xml')
                 ):
                     continue
 
@@ -590,7 +648,7 @@ Description: {desc}
                 elif name.endswith('.py') and item != self.selected_script_path:
                     install_lines.append(f'{name}\tusr/lib/{pkg}/')
 
-        # 4. Erstelle saubere debian/install (exakt wie von dir gewünscht)
+        # 4. Erstelle saubere debian/install
         (deb_dir / 'install').write_text(
             '\n'.join(install_lines) + '\n', encoding='utf-8'
         )
@@ -655,8 +713,15 @@ Description: {desc}
             if deb_file and deb_file.exists():
                 self.created_deb_path = deb_file
                 sha = self.calculate_sha256(deb_file)
+
+                # 1. SHA-256 in eine .sha256 Datei neben der .deb speichern
+                sha_file = deb_file.parent / f"{deb_file.name}.sha256"
+                sha_file.write_text(f"{sha}  {deb_file.name}\n", encoding='utf-8')
+
+                # 2. UI aktualisieren & Kopier-Button aktivieren
                 self.status_row.set_subtitle(f'✓ Paket erstellt: {deb_file.name}')
                 self.sha_row.set_subtitle(sha)
+                self.btn_copy_sha.set_sensitive(True)
 
                 self.btn_open_folder.set_sensitive(True)
             else:

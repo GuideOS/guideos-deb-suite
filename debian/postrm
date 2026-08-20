@@ -9,5 +9,9 @@ if [ -x /usr/bin/update-desktop-database ]; then
     update-desktop-database -q /usr/share/applications || true
 fi
 
+if [ -x /usr/bin/appstreamcli ]; then
+    appstreamcli refresh-cache --force || true
+fi
+
 #DEBHELPER#
 exit 0
