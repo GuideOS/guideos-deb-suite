@@ -1,0 +1,5 @@
+guideos-deb-suite (1.0.1) unstable; urgency=medium
+
+  * Automatisches Release via GuideOS Builder.
+
+ -- Nightworker <nightworker@guideos.de>  Fri, 21 Aug 2026 18:25:27 +0200

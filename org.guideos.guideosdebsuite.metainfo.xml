@@ -4,10 +4,10 @@
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>MIT</project_license>
   <name>guideos-deb-suite</name>
-  <summary>Eine GTK4 Anwendung zum einfachen Erstellen von Debian-Paketen aus Python-Projekten</summary>
+  <summary>Grafische Anwendung zum einfachen Erstellen von Debian-Paketen aus Python-Projekten</summary>
   <description>
     <p>
-      Eine GTK4 Anwendung zum einfachen Erstellen von Debian-Paketen aus Python-Projekten
+      Grafische Anwendung zum einfachen Erstellen von Debian-Paketen aus Python-Projekten
     </p>
   </description>
   <launchable type="desktop-id">guideos-deb-suite.desktop</launchable>

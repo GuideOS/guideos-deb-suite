@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 import ast
+import email.utils
 import hashlib
 import os
 from pathlib import Path
@@ -170,7 +171,7 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
 
         # --- 3. Control Metadaten ---
         group_meta = Adw.PreferencesGroup(
-            title='3. Paket-Konfiguration (debian/control)',
+            title='3. Paket-Konfiguration (debian/control & changelog)',
             description=(
                 '⚠️ Abhängigkeiten wurden automatisch erkannt. Bitte manuell auf'
                 ' Vollständigkeit prüfen!'
@@ -179,17 +180,23 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
         page.add(group_meta)
 
         self.entry_pkg = Adw.EntryRow(title='Package (Name)')
+        self.entry_version = Adw.EntryRow(title='Version')
         self.entry_maint = Adw.EntryRow(title='Maintainer')
         self.entry_section = Adw.EntryRow(title='Section')
         self.entry_deps = Adw.EntryRow(title='Depends (Abhängigkeiten)')
         self.entry_desc = Adw.EntryRow(title='Description (Kurzbeschreibung)')
+        self.entry_changelog = Adw.EntryRow(title='Changelog-Notiz')
 
         group_meta.add(self.entry_pkg)
+        group_meta.add(self.entry_version)
         group_meta.add(self.entry_maint)
         group_meta.add(self.entry_section)
         group_meta.add(self.entry_deps)
         group_meta.add(self.entry_desc)
+        group_meta.add(self.entry_changelog)
 
+        self.entry_version.set_text('1.0.0')
+        self.entry_changelog.set_text('Automatisches Release via GuideOS Builder.')
         self.entry_section.set_text('utils')
         self.entry_maint.set_text('Max Mustermann <mustermann@guideos.de>')
         self.entry_deps.set_text('python3, ${misc:Depends}')
@@ -258,8 +265,7 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
 
         self.entry_app_id = Adw.EntryRow(title='App-ID (Reverse-DNS-Format)')
         self.entry_app_license = Adw.EntryRow(title='Projekt-Lizenz (SPDX-ID)')
-        
-        # NEU: Screenshots-Eingabefeld & Button
+
         self.entry_app_screenshots = Adw.EntryRow(
             title='Screenshot URLs (kommagetrennt)',
         )
@@ -324,23 +330,31 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
         self.created_deb_path = None
 
     def show_error_dialog(self, title: str, details: str):
-        """Zeigt eine Fehlermeldung an."""
+        """Zeigt eine Fehlermeldung mit vollständiger Fehlerbeschreibung an."""
         dialog = Adw.MessageDialog(
             transient_for=self,
             heading=title,
-            body="Der genaue Fehlertext steht unten:"
+            body="Der genaue Fehlertext steht im folgenden Feld:"
         )
 
         scrolled = Gtk.ScrolledWindow()
-        scrolled.set_min_content_height(200)
+        scrolled.set_min_content_height(250)
+        scrolled.set_min_content_width(500)
         scrolled.set_hexpand(True)
+        scrolled.set_vexpand(True)
 
         text_view = Gtk.TextView()
         text_view.set_editable(False)
         text_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)
-        text_view.get_buffer().set_text(details)
+        text_view.set_monospace(True)
+
+        error_text = details.strip() if details and details.strip() else "Keine spezifische Fehlermeldung vom Prozess zurückgegeben."
+        text_view.get_buffer().set_text(error_text)
 
         scrolled.set_child(text_view)
+
+        dialog.set_extra_child(scrolled)
+
         dialog.add_response("ok", "OK")
         dialog.present()
 
@@ -366,7 +380,6 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
             return
 
         urls = []
-        # Prüfe Git-Remote URL
         git_dir = self.project_dir / ".git"
         raw_base_url = None
 
@@ -380,7 +393,6 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
                 )
                 if res.returncode == 0:
                     remote = res.stdout.strip()
-                    # Wandle HTTPS/SSH Git URLs in Raw URLs um
                     if "github.com" in remote:
                         clean = remote.removesuffix(".git").replace("git@github.com:", "https://github.com/")
                         parts = clean.split("github.com/")[-1].split("/")
@@ -394,13 +406,11 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
             except Exception:
                 pass
 
-        # Suche PNGs (ignoriere 'icon' PNGs)
         for png in self.project_dir.glob("*.png"):
             if "icon" not in png.name.lower():
                 if raw_base_url:
                     urls.append(f"{raw_base_url}/{png.name}")
                 else:
-                    # Fallback Platzhalter-URL
                     urls.append(f"https://example.com/screenshots/{png.name}")
 
         if urls:
@@ -437,7 +447,6 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
                 auto_deps = detect_python_dependencies(self.project_dir)
                 self.entry_deps.set_text(', '.join(auto_deps))
 
-                # Automatisch versuchen Screenshots zu finden
                 self.on_auto_detect_screenshots()
 
                 self.build_btn.set_sensitive(True)
@@ -541,7 +550,6 @@ StartupWMClass={exec_name}
         license_type = self.entry_app_license.get_text().strip() or "MIT"
         icon_name = self.entry_desktop_icon.get_text().strip() or pkg_name
 
-        # Parse Screenshots aus Eingabefeld
         raw_urls = self.entry_app_screenshots.get_text().strip()
         screenshots_xml = ""
         if raw_urls:
@@ -631,7 +639,7 @@ exit 0
             hook_file.write_text(script_content, encoding='utf-8')
             hook_file.chmod(0o755)
 
-    def generate_debian_structure(self, pkg, maint, section, deps, desc):
+    def generate_debian_structure(self, pkg, version, maint, section, deps, desc, changelog_msg):
         deb_dir = self.project_dir / 'debian'
         source_dir = deb_dir / 'source'
         source_dir.mkdir(parents=True, exist_ok=True)
@@ -670,7 +678,7 @@ Description: {desc}
                 if self.selected_script_path.suffix == '.py'
                 else self.selected_script_path.name
             )
-            
+
             bin_target_file = self.project_dir / exec_name
             if self.selected_script_path != bin_target_file:
                 shutil.copy2(self.selected_script_path, bin_target_file)
@@ -729,11 +737,13 @@ Description: {desc}
             '\n'.join(install_lines) + '\n', encoding='utf-8'
         )
 
-        changelog_content = f"""{pkg} (1.0.0) unstable; urgency=medium
+        now_rfc2822 = email.utils.formatdate(localtime=True)
 
-  * Automatisches Release via GuideOS Builder.
+        changelog_content = f"""{pkg} ({version}) unstable; urgency=medium
 
- -- {maint}  Wed, 19 Aug 2026 12:00:00 +0200
+  * {changelog_msg}
+
+ -- {maint}  {now_rfc2822}
 """
         (deb_dir / 'changelog').write_text(changelog_content, encoding='utf-8')
 
@@ -756,6 +766,7 @@ Description: {desc}
             return
 
         pkg = self.entry_pkg.get_text().strip()
+        version = self.entry_version.get_text().strip() or "1.0.0"
         maint = self.entry_maint.get_text().strip()
 
         section_raw = self.entry_section.get_text().strip()
@@ -763,11 +774,12 @@ Description: {desc}
 
         deps = self.entry_deps.get_text().strip()
         desc = self.entry_desc.get_text().strip()
+        changelog_msg = self.entry_changelog.get_text().strip() or "Automatisches Release via GuideOS Builder."
 
         try:
             self.status_row.set_subtitle('Generiere debian/-Struktur & Vektorisiere Icons...')
 
-            self.generate_debian_structure(pkg, maint, section, deps, desc)
+            self.generate_debian_structure(pkg, version, maint, section, deps, desc, changelog_msg)
 
             self.status_row.set_subtitle('Starte dpkg-buildpackage...')
             cmd = ['dpkg-buildpackage', '-us', '-uc', '-b']
@@ -790,11 +802,9 @@ Description: {desc}
                 self.created_deb_path = deb_file
                 sha = self.calculate_sha256(deb_file)
 
-                # 1. SHA-256 in eine .sha256 Datei neben der .deb speichern
                 sha_file = deb_file.parent / f"{deb_file.name}.sha256"
                 sha_file.write_text(f"{sha}  {deb_file.name}\n", encoding='utf-8')
 
-                # 2. UI aktualisieren & Kopier-Button aktivieren
                 self.status_row.set_subtitle(f'✓ Paket erstellt: {deb_file.name}')
                 self.sha_row.set_subtitle(sha)
                 self.btn_copy_sha.set_sensitive(True)
