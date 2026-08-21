@@ -1,3 +1,8 @@
+<div style="display:flex; gap:10px;">
+  <img src="screenshots/screenshot_1.png" width="270" height="270">
+  <img src="screenshots/screenshot_2.png" width="270" height="270">  
+</div>
+
 ## 📦 GuideOS DEB Suite
 Ein modernes, grafisches GTK4/Libadwaita-Tool zum schnellen und unkomplizierten Erstellen von Debian/Ubuntu-Paketen (.deb) aus Python-Projekten.
 
