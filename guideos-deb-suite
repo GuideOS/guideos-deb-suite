@@ -51,11 +51,17 @@ def check_and_install_build_tools() -> tuple[bool, str]:
         return False, f"Fehler beim Aufruf von pkexec:\n{str(e)}"
 
 
-def detect_python_dependencies(project_dir: Path) -> list[str]:
-    """Scannt Python-Dateien im Projektordner nach Importen."""
+def detect_python_dependencies(target_path: Path) -> list[str]:
+    """Scannt ein Python-Skript oder alle Python-Dateien im Ordner nach Importen."""
     detected_modules = set()
 
-    for py_file in project_dir.glob('*.py'):
+    py_files = []
+    if target_path.is_file():
+        py_files = [target_path]
+    elif target_path.is_dir():
+        py_files = list(target_path.glob('*.py'))
+
+    for py_file in py_files:
         try:
             tree = ast.parse(py_file.read_text(encoding='utf-8'))
             for node in ast.walk(tree):
@@ -112,7 +118,7 @@ def vectorize_image_inkscape(input_path: Path, output_path: Path):
         raise RuntimeError(f'Inkscape Fehler:\n{res.stderr}')
 
 
-class GuideosDebBuilderWindow(Adw.ApplicationWindow):
+class GuideosDebSuiteWindow(Adw.ApplicationWindow):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -144,77 +150,12 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
         self.folder_row.add_suffix(btn_select)
         group_folder.add(self.folder_row)
 
-        # --- 2. Icon Vektorierung ---
-        group_icon = Adw.PreferencesGroup(
-            title='2. Icon-Vektorierung (Inkscape)',
-            description='PNG-Dateien auswählen und automatisch via Inkscape in SVGs umwandeln.',
-        )
-        page.add(group_icon)
-
-        self.switch_vectorize = Adw.SwitchRow(
-            title='PNGs zu SVG konvertieren',
-            subtitle='Erstellt SVGs in icons/ und bindet sie in hicolor ein.',
-        )
-        self.switch_vectorize.set_active(True)
-        group_icon.add(self.switch_vectorize)
-
-        self.row_png_select = Adw.ActionRow(
-            title='PNG-Icons',
-            subtitle='Automatisch im Projektordner suchen oder manuell wählen',
-        )
-        btn_select_png = Gtk.Button(label='PNGs wählen…')
-        btn_select_png.connect('clicked', self.on_select_pngs)
-        self.row_png_select.add_suffix(btn_select_png)
-        group_icon.add(self.row_png_select)
-
-        self.custom_png_files = []
-
-        # --- 3. Control Metadaten ---
-        group_meta = Adw.PreferencesGroup(
-            title='3. Paket-Konfiguration (debian/control & changelog)',
-            description=(
-                '⚠️ Abhängigkeiten wurden automatisch erkannt. Bitte manuell auf'
-                ' Vollständigkeit prüfen!'
-            ),
-        )
-        page.add(group_meta)
-
-        self.entry_pkg = Adw.EntryRow(title='Package (Name)')
-        self.entry_version = Adw.EntryRow(title='Version')
-        self.entry_maint = Adw.EntryRow(title='Maintainer')
-        self.entry_section = Adw.EntryRow(title='Section')
-        self.entry_deps = Adw.EntryRow(title='Depends (Abhängigkeiten)')
-        self.entry_desc = Adw.EntryRow(title='Description (Kurzbeschreibung)')
-        self.entry_changelog = Adw.EntryRow(title='Changelog-Notiz')
-
-        group_meta.add(self.entry_pkg)
-        group_meta.add(self.entry_version)
-        group_meta.add(self.entry_maint)
-        group_meta.add(self.entry_section)
-        group_meta.add(self.entry_deps)
-        group_meta.add(self.entry_desc)
-        group_meta.add(self.entry_changelog)
-
-        self.entry_version.set_text('1.0.0')
-        self.entry_changelog.set_text('Automatisches Release via GuideOS Builder.')
-        self.entry_section.set_text('utils')
-        self.entry_maint.set_text('Max Mustermann <mustermann@guideos.de>')
-        self.entry_deps.set_text('python3, ${misc:Depends}')
-        self.entry_desc.set_text('Grafische Anwendung für Linux')
-
-        # --- 4. .desktop Datei Erstellung ---
+        # --- 2. Haupt-Skript & .desktop Datei Erstellung ---
         group_desktop = Adw.PreferencesGroup(
-            title='4. .desktop-Datei erzeugen (Optional)',
-            description='Erstellt eine Anwendungs-Starterdatei im Projektordner.'
+            title='2. Haupt-Skript & .desktop-Datei',
+            description='Wähle das auszuführende Skript. Die Abhängigkeiten werden automatisch analysiert.'
         )
         page.add(group_desktop)
-
-        self.switch_desktop = Adw.SwitchRow(
-            title='.desktop-Datei generieren',
-            subtitle='Erstellt eine .desktop-Datei und bindet sie ins Menü ein.',
-        )
-        self.switch_desktop.set_active(True)
-        group_desktop.add(self.switch_desktop)
 
         self.row_desktop_script = Adw.ActionRow(
             title='Haupt-Skript (Exec)',
@@ -224,6 +165,13 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
         btn_select_script.connect('clicked', self.on_select_script)
         self.row_desktop_script.add_suffix(btn_select_script)
         group_desktop.add(self.row_desktop_script)
+
+        self.switch_desktop = Adw.SwitchRow(
+            title='.desktop-Datei generieren',
+            subtitle='Erstellt eine .desktop-Datei und bindet sie ins Menü ein.',
+        )
+        self.switch_desktop.set_active(True)
+        group_desktop.add(self.switch_desktop)
 
         self.entry_desktop_icon = Adw.EntryRow(
             title='Icon-Name (ohne Endung)',
@@ -248,6 +196,64 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
         self.switch_desktop_terminal.set_active(False)
 
         self.selected_script_path = None
+
+        # --- 3. Icon Vektorierung ---
+        group_icon = Adw.PreferencesGroup(
+            title='3. Icon-Vektorierung (Inkscape)',
+            description='PNG-Dateien auswählen und automatisch via Inkscape in SVGs umwandeln.',
+        )
+        page.add(group_icon)
+
+        self.switch_vectorize = Adw.SwitchRow(
+            title='PNGs zu SVG konvertieren',
+            subtitle='Erstellt SVGs in icons/ und bindet sie in hicolor ein.',
+        )
+        self.switch_vectorize.set_active(True)
+        group_icon.add(self.switch_vectorize)
+
+        self.row_png_select = Adw.ActionRow(
+            title='PNG-Icons',
+            subtitle='Automatisch im Projektordner suchen oder manuell wählen',
+        )
+        btn_select_png = Gtk.Button(label='PNGs wählen…')
+        btn_select_png.connect('clicked', self.on_select_pngs)
+        self.row_png_select.add_suffix(btn_select_png)
+        group_icon.add(self.row_png_select)
+
+        self.custom_png_files = []
+
+        # --- 4. Control Metadaten ---
+        group_meta = Adw.PreferencesGroup(
+            title='4. Paket-Konfiguration (debian/control & changelog)',
+            description=(
+                '⚠️ Abhängigkeiten wurden automatisch erkannt. Bitte manuell auf'
+                ' Vollständigkeit prüfen!'
+            ),
+        )
+        page.add(group_meta)
+
+        self.entry_pkg = Adw.EntryRow(title='Package (Name)')
+        self.entry_version = Adw.EntryRow(title='Version')
+        self.entry_maint = Adw.EntryRow(title='Maintainer')
+        self.entry_section = Adw.EntryRow(title='Section')
+        self.entry_deps = Adw.EntryRow(title='Depends (Abhängigkeiten)')
+        self.entry_desc = Adw.EntryRow(title='Description (Kurzbeschreibung)')
+        self.entry_changelog = Adw.EntryRow(title='Changelog-Notiz')
+
+        group_meta.add(self.entry_pkg)
+        group_meta.add(self.entry_version)
+        group_meta.add(self.entry_maint)
+        group_meta.add(self.entry_section)
+        group_meta.add(self.entry_deps)
+        group_meta.add(self.entry_desc)
+        group_meta.add(self.entry_changelog)
+
+        self.entry_version.set_text('1.0.0')
+        self.entry_changelog.set_text('Automatisches Release via GuideOS DEB Suite.')
+        self.entry_section.set_text('utils')
+        self.entry_maint.set_text('Max Mustermann <mustermann@guideos.de>')
+        self.entry_deps.set_text('python3, ${misc:Depends}')
+        self.entry_desc.set_text('Grafische Anwendung für Linux')
 
         # --- 5. AppStream Metainfo Erstellung ---
         group_appstream = Adw.PreferencesGroup(
@@ -328,6 +334,13 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
 
         self.project_dir = None
         self.created_deb_path = None
+
+    def update_dependencies(self):
+        """Aktualisiert die Abhängigkeiten basierend auf dem gewählten Skript oder Ordner."""
+        target = self.selected_script_path or self.project_dir
+        if target and target.exists():
+            auto_deps = detect_python_dependencies(target)
+            self.entry_deps.set_text(', '.join(auto_deps))
 
     def show_error_dialog(self, title: str, details: str):
         """Zeigt eine Fehlermeldung mit vollständiger Fehlerbeschreibung an."""
@@ -444,8 +457,8 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
                 else:
                     self.entry_desktop_icon.set_text(base_name)
 
-                auto_deps = detect_python_dependencies(self.project_dir)
-                self.entry_deps.set_text(', '.join(auto_deps))
+                # Abhängigkeiten basierend auf dem vorausgewählten Skript ermitteln
+                self.update_dependencies()
 
                 self.on_auto_detect_screenshots()
 
@@ -512,6 +525,8 @@ class GuideosDebBuilderWindow(Adw.ApplicationWindow):
             if file:
                 self.selected_script_path = Path(file.get_path())
                 self.row_desktop_script.set_subtitle(self.selected_script_path.name)
+                # Nach dem Auswählen des neuen Hauptskripts die Abhängigkeiten aktualisieren
+                self.update_dependencies()
         except Exception:
             pass
 
@@ -774,7 +789,7 @@ Description: {desc}
 
         deps = self.entry_deps.get_text().strip()
         desc = self.entry_desc.get_text().strip()
-        changelog_msg = self.entry_changelog.get_text().strip() or "Automatisches Release via GuideOS Builder."
+        changelog_msg = self.entry_changelog.get_text().strip() or "Automatisches Release via GuideOS DEB Suite."
 
         try:
             self.status_row.set_subtitle('Generiere debian/-Struktur & Vektorisiere Icons...')
@@ -822,14 +837,14 @@ class App(Adw.Application):
 
     def __init__(self):
         super().__init__(
-            application_id='de.guideos.DebBuilder',
+            application_id='de.guideos.DebSuite',
             flags=Gio.ApplicationFlags.FLAGS_NONE,
         )
 
     def do_activate(self):
         win = self.props.active_window
         if not win:
-            win = GuideosDebBuilderWindow(application=self)
+            win = GuideosDebSuiteWindow(application=self)
         win.present()
 
 
