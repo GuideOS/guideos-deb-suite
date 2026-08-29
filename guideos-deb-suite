@@ -572,6 +572,10 @@ StartupWMClass={exec_name}
             if url_list:
                 shots_entries = []
                 for idx, url in enumerate(url_list):
+                    # Bei GitHub-URLs automatisch ?raw=true anfügen, falls noch nicht vorhanden
+                    if "github.com" in url and not url.endswith("?raw=true"):
+                        url = f"{url}?raw=true"
+
                     is_default = ' type="default"' if idx == 0 else ''
                     shots_entries.append(
                         f'    <screenshot{is_default}>\n'
